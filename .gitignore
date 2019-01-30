@@ -114,3 +114,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+uncased_L-24_H-1024_A-16/
+.vscode/
+Temp/

@@ -22,6 +22,8 @@ import collections
 import csv
 import os
 from os import path
+import logging.config
+import random
 
 from nltk import TreebankWordTokenizer
 from wikilednlp.embeddings.VectorManagers import Word2VecManager
@@ -40,6 +42,11 @@ import tensorflow as tf
 flags = tf.flags
 
 FLAGS = flags.FLAGS
+
+logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
+logger = logging.getLogger(__name__)
+Constants.TMP = '/home/andrius/tmp'
+Constants.set_root('/media/andrius/Code')
 
 ## Required parameters
 flags.DEFINE_string(
@@ -305,45 +312,43 @@ class MnliProcessor(DataProcessor):
 
 
 class MrpcProcessor(DataProcessor):
-    """Processor for the MRPC data set (GLUE version)."""
+  """Processor for the MRPC data set (GLUE version)."""
 
-    def __init__(self):
-        lexicon = Lexicon(TreebankWordTokenizer())
-        word2vec_name = 'word2vec/Imdb_min2.bin'
-        vocab_size = 10000
-        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
-        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
-        source = EmbeddingVecSource(lexicon, word2vec)
-        self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'aclImdb'))
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
 
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(self.loader.get_data('All/Train', delete=True), 'train')
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
 
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(self.loader.get_data('All/Train', delete=True), 'dev')
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
 
-    def get_test_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(self.loader.get_data('All/Test', delete=True), 'test')
+  def get_labels(self):
+    """See base class."""
+    return ["0", "1"]
 
-    def get_labels(self):
-        """See base class."""
-        return ["0", "1"]
-
-    def _create_examples(self, data: LoadingResult, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for original in data.original:
-            guid = "%s-%s" % (set_type, original.name)
-            text_a = tokenization.convert_to_unicode(original.text)
-            if set_type == "test":
-                label = "0"
-            else:
-                label = tokenization.convert_to_unicode(original.result_class)
-            examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
-        return examples
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    for (i, line) in enumerate(lines):
+      if i == 0:
+        continue
+      guid = "%s-%s" % (set_type, i)
+      text_a = tokenization.convert_to_unicode(line[3])
+      text_b = tokenization.convert_to_unicode(line[4])
+      if set_type == "test":
+        label = "0"
+      else:
+        label = tokenization.convert_to_unicode(line[0])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+    return examples
 
 
 class ColaProcessor(DataProcessor):
@@ -384,6 +389,49 @@ class ColaProcessor(DataProcessor):
                 label = tokenization.convert_to_unicode(line[1])
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+
+class ImdbProcessor(ColaProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def __init__(self):
+        lexicon = Lexicon(TreebankWordTokenizer())
+        word2vec_name = 'word2vec/Imdb_min2.bin'
+        vocab_size = 10000
+        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
+        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
+        source = EmbeddingVecSource(lexicon, word2vec)
+        self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'aclImdb'))
+        self.train = self.loader.get_data('All/Train', delete=True)
+        self.test = self.loader.get_data('All/Test', delete=True)
+
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self.train, 'train')
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self.train, 'dev')
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(self.test, 'test')    
+
+    def _create_examples(self, data: LoadingResult, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for original in data.original:
+            guid = "%s-%s" % (set_type, original.name)
+            text_a = tokenization.convert_to_unicode(original.text)
+            if set_type == "test":
+                label = "0"
+            else:
+                label = tokenization.convert_to_unicode(str(original.y))
+            examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+
+        random.shuffle(examples)
         return examples
 
 
@@ -801,6 +849,7 @@ def main(_):
         "mnli": MnliProcessor,
         "mrpc": MrpcProcessor,
         "xnli": XnliProcessor,
+        "imdb": ImdbProcessor        
     }
 
     tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
