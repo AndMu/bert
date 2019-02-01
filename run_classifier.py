@@ -29,10 +29,12 @@ from nltk import TreebankWordTokenizer
 from wikilednlp.embeddings.VectorManagers import Word2VecManager
 from wikilednlp.embeddings.VectorSources import EmbeddingVecSource
 from wikilednlp.utilities import Constants
-from wikilednlp.utilities.DataLoaders import ImdbDataLoader
+from wikilednlp.utilities.DataLoaders import ImdbDataLoader, SemEvalDataLoader
 from wikilednlp.utilities.Lexicon import Lexicon
 from wikilednlp.utilities.LoadingResult import LoadingResult
-from wikilednlp.utilities.Utilities import ClassConvertor
+from wikilednlp.utilities.ClassConvertors import ClassConvertor
+from wikilednlp.utilities.TwitterTreebankWordTokenizer import TwitterTreebankWordTokenizer
+from wikilednlp.utilities.Utilities import Utilities
 
 import modeling
 import optimization
@@ -45,8 +47,13 @@ FLAGS = flags.FLAGS
 
 logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
-Constants.TMP = '/home/andrius/tmp'
-Constants.set_root('/media/andrius/Code')
+
+if os.name == 'nt':
+    Constants.set_root('e:/')
+else:
+    Constants.TMP = '/home/andrius/tmp'
+    Constants.set_root('/media/andrius/Code')
+
 
 ## Required parameters
 flags.DEFINE_string(
@@ -396,14 +403,22 @@ class ImdbProcessor(ColaProcessor):
     """Processor for the MRPC data set (GLUE version)."""
 
     def __init__(self):
-        lexicon = Lexicon(TreebankWordTokenizer())
         word2vec_name = 'word2vec/Imdb_min2.bin'
-        vocab_size = 10000
+        vocab_size = 100000
+        lexicon = Lexicon(TwitterTreebankWordTokenizer())
+        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
+        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
+        source = EmbeddingVecSource(lexicon, word2vec)
+        self.loader = SemEvalDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'semeval'))
+        self.train = self.loader.get_data('train.txt', delete=True)
+        # self.test = self.loader.get_data('SemEval2017-task4-test.subtask-BD.english.out', delete=True)
+
+        lexicon = Lexicon(TreebankWordTokenizer())
         class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
         word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
         source = EmbeddingVecSource(lexicon, word2vec)
         self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'aclImdb'))
-        self.train = self.loader.get_data('All/Train', delete=True)
+        # self.train = self.loader.get_data('All/Train', delete=True)
         self.test = self.loader.get_data('All/Test', delete=True)
 
 
@@ -413,7 +428,7 @@ class ImdbProcessor(ColaProcessor):
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self.train, 'dev')
+        return self._create_examples(self.test, 'dev')
 
     def get_test_examples(self, data_dir):
         """See base class."""
@@ -434,6 +449,35 @@ class ImdbProcessor(ColaProcessor):
         random.shuffle(examples)
         return examples
 
+
+class SemEvalProcessor(ImdbProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def __init__(self):
+        lexicon = Lexicon(TwitterTreebankWordTokenizer())
+        word2vec_name = 'word2vec/SemEval_min2.bin'
+        vocab_size = 100000
+        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
+        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
+        source = EmbeddingVecSource(lexicon, word2vec)
+        self.loader = SemEvalDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'semeval'))
+        self.train = self.loader.get_data('train.txt', delete=True)
+        self.test = self.loader.get_data('SemEval2017-task4-test.subtask-BD.english.out', delete=True)
+
+
+class AmazonProcessor(ImdbProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def __init__(self):
+        lexicon = Lexicon(TreebankWordTokenizer())
+        word2vec_name = 'word2vec/amazon.bin'
+        vocab_size = 100000
+        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
+        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
+        source = EmbeddingVecSource(lexicon, word2vec)
+        self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'amazon'))
+        self.train = self.loader.get_data('out', delete=True)
+        self.test = self.loader.get_data('test', delete=True)
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
@@ -747,6 +791,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 accuracy = tf.metrics.accuracy(
                     labels=label_ids, predictions=predictions, weights=is_real_example)
                 loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
+                auc = tf.metrics.auc(labels=label_ids, predictions=predictions, weights=is_real_example)
+                Utilities.measure_performance(label_ids, predictions)
                 return {
                     "eval_accuracy": accuracy,
                     "eval_loss": loss,
@@ -849,7 +895,9 @@ def main(_):
         "mnli": MnliProcessor,
         "mrpc": MrpcProcessor,
         "xnli": XnliProcessor,
-        "imdb": ImdbProcessor        
+        "imdb": ImdbProcessor,
+        "semeval" : SemEvalProcessor,
+        "amazon": AmazonProcessor
     }
 
     tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
