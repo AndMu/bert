@@ -405,20 +405,12 @@ class ImdbProcessor(ColaProcessor):
     def __init__(self):
         word2vec_name = 'word2vec/Imdb_min2.bin'
         vocab_size = 100000
-        lexicon = Lexicon(TwitterTreebankWordTokenizer())
-        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
-        word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
-        source = EmbeddingVecSource(lexicon, word2vec)
-        self.loader = SemEvalDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'semeval'))
-        self.train = self.loader.get_data('train.txt', delete=True)
-        # self.test = self.loader.get_data('SemEval2017-task4-test.subtask-BD.english.out', delete=True)
-
         lexicon = Lexicon(TreebankWordTokenizer())
         class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
         word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
         source = EmbeddingVecSource(lexicon, word2vec)
         self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'aclImdb'))
-        # self.train = self.loader.get_data('All/Train', delete=True)
+        self.train = self.loader.get_data('generated', delete=True)
         self.test = self.loader.get_data('All/Test', delete=True)
 
 
@@ -478,6 +470,7 @@ class AmazonProcessor(ImdbProcessor):
         self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'amazon'))
         self.train = self.loader.get_data('out', delete=True)
         self.test = self.loader.get_data('test', delete=True)
+
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
@@ -791,8 +784,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 accuracy = tf.metrics.accuracy(
                     labels=label_ids, predictions=predictions, weights=is_real_example)
                 loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
-                auc = tf.metrics.auc(labels=label_ids, predictions=predictions, weights=is_real_example)
-                Utilities.measure_performance(label_ids, predictions)
+                _, roc_score = tf.metrics.auc(labels=label_ids, predictions=predictions, weights=is_real_example)
+                logger.info("AUC {} Accuracy {}".format(roc_score, accuracy))
+                # Utilities.measure_performance(tf.Session().run(label_ids), tf.Session().run(predictions))
                 return {
                     "eval_accuracy": accuracy,
                     "eval_loss": loss,
