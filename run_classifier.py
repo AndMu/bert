@@ -45,6 +45,10 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
+# config=tf.ConfigProto(log_device_placement=True)
+# config.gpu_options.visible_device_list = '1'
+# sess = tf.Session(config=config)
+
 logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
@@ -406,13 +410,11 @@ class ImdbProcessor(ColaProcessor):
         word2vec_name = 'word2vec/Imdb_min2.bin'
         vocab_size = 100000
         lexicon = Lexicon(TreebankWordTokenizer())
-        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
         word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
         source = EmbeddingVecSource(lexicon, word2vec)
-        self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'aclImdb'))
-        self.train = self.loader.get_data('generated', delete=True)
-        self.test = self.loader.get_data('All/Test', delete=True)
-
+        self.loader = ImdbDataLoader(source, root=path.join(Constants.DATASETS, 'aclImdb'))
+        self.train = 'Mixed'
+        self.test = 'All/Test'
 
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -426,10 +428,11 @@ class ImdbProcessor(ColaProcessor):
         """See base class."""
         return self._create_examples(self.test, 'test')    
 
-    def _create_examples(self, data: LoadingResult, set_type):
+    def _create_examples(self, data_path, set_type):
         """Creates examples for the training and dev sets."""
+        data = self.loader.get_data(data_path)
         examples = []
-        for original in data.original:
+        for original in data.records:
             guid = "%s-%s" % (set_type, original.name)
             text_a = tokenization.convert_to_unicode(original.text)
             if set_type == "test":
@@ -449,12 +452,11 @@ class SemEvalProcessor(ImdbProcessor):
         lexicon = Lexicon(TwitterTreebankWordTokenizer())
         word2vec_name = 'word2vec/SemEval_min2.bin'
         vocab_size = 100000
-        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
         word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
         source = EmbeddingVecSource(lexicon, word2vec)
-        self.loader = SemEvalDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'semeval'))
-        self.train = self.loader.get_data('train.txt', delete=True)
-        self.test = self.loader.get_data('SemEval2017-task4-test.subtask-BD.english.out', delete=True)
+        self.loader = SemEvalDataLoader(source, root=path.join(Constants.DATASETS, 'semeval'), convertor=ClassConvertor("Binary", {"negative": 0, "positive": 1}))
+        self.train = 'train.txt'
+        self.test = 'SemEval2017-task4-test.subtask-BD.english.out'
 
 
 class AmazonProcessor(ImdbProcessor):
@@ -464,12 +466,11 @@ class AmazonProcessor(ImdbProcessor):
         lexicon = Lexicon(TreebankWordTokenizer())
         word2vec_name = 'word2vec/amazon.bin'
         vocab_size = 100000
-        class_convertor = ClassConvertor("Binary", {"negative": 0, "positive": 1})
         word2vec = Word2VecManager(path.join(Constants.DATASETS, word2vec_name), vocab_size=vocab_size)
         source = EmbeddingVecSource(lexicon, word2vec)
-        self.loader = ImdbDataLoader(source, class_convertor, root=path.join(Constants.DATASETS, 'amazon'))
-        self.train = self.loader.get_data('out', delete=True)
-        self.test = self.loader.get_data('test', delete=True)
+        self.loader = ImdbDataLoader(source, root=path.join(Constants.DATASETS, 'amazon'))
+        self.train = 'out'
+        self.test = 'test'
 
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
@@ -730,7 +731,6 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         input_mask = features["input_mask"]
         segment_ids = features["segment_ids"]
         label_ids = features["label_ids"]
-        is_real_example = None
         if "is_real_example" in features:
             is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
         else:
@@ -766,7 +766,6 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                             init_string)
 
-        output_spec = None
         if mode == tf.estimator.ModeKeys.TRAIN:
 
             train_op = optimization.create_optimizer(
@@ -781,16 +780,20 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
             def metric_fn(per_example_loss, label_ids, logits, is_real_example):
                 predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
-                accuracy = tf.metrics.accuracy(
-                    labels=label_ids, predictions=predictions, weights=is_real_example)
-                loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
-                _, roc_score = tf.metrics.auc(labels=label_ids, predictions=predictions, weights=is_real_example)
-                logger.info("AUC {} Accuracy {}".format(roc_score, accuracy))
+                # accuracy = tf.metrics.accuracy(
+                #     labels=label_ids, predictions=predictions, weights=is_real_example)
+                # loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
+                # auc, update_op = tf.metrics.auc(labels=label_ids, predictions=predictions, weights=is_real_example)
+                # Display labels and predictions
+                # concat1 = tf.contrib.metrics.streaming_concat(logits)
+                concat1 = tf.contrib.metrics.streaming_concat(predictions)
+                concat2 = tf.contrib.metrics.streaming_concat(label_ids)
+                # sess = tf.Session()
+                # sess.run(tf.global_variables_initializer())
+                # sess.run(tf.local_variables_initializer())
+                # print(sess.run([auc, update_op]))
                 # Utilities.measure_performance(tf.Session().run(label_ids), tf.Session().run(predictions))
-                return {
-                    "eval_accuracy": accuracy,
-                    "eval_loss": loss,
-                }
+                return {'pred': concat1, 'label_ids': concat2}
 
             eval_metrics = (metric_fn,
                             [per_example_loss, label_ids, logits, is_real_example])
@@ -1022,6 +1025,10 @@ def main(_):
 
         result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
+        actual = result["label_ids"]
+        predicted = result["pred"]
+        Utilities.measure_performance(actual, predicted)
+        Utilities.measure_performance_auc(actual, predicted, predicted)
         output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
         with tf.gfile.GFile(output_eval_file, "w") as writer:
             tf.logging.info("***** Eval results *****")
