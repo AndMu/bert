@@ -23,6 +23,10 @@ import json
 import math
 import os
 import random
+
+from nltk import TreebankWordTokenizer
+from wikilednlp.utilities.Lexicon import Lexicon
+
 import modeling
 import optimization
 import tokenization
@@ -224,7 +228,35 @@ class InputFeatures(object):
     self.is_impossible = is_impossible
 
 
+def read_translation(input_file):
+    examples = []
+    lexicon = Lexicon(TreebankWordTokenizer())
+    with open(input_file, encoding='utf8') as f:
+        next(f)
+        for line in f:
+            example = line.split('\t')
+            question = example[0]
+            answer = example[1]
+            doc_tokens = lexicon.review_to_wordlist(question)
+            example = SquadExample(
+                qas_id=False,
+                question_text=question,
+                doc_tokens=doc_tokens,
+                orig_answer_text=answer,
+                start_position=0,
+                end_position=len(answer),
+                is_impossible=False)
+            examples.append(example)
+    return examples
+
+
 def read_squad_examples(input_file, is_training):
+    source = read_translation('Lithuanian_English.csv')
+    target = read_translation('English_Lithuanian.csv')
+    return source + target
+
+
+def read_squad_examples2(input_file, is_training):
   """Read a SQuAD json file into a list of SquadExample."""
   with tf.gfile.Open(input_file, "r") as reader:
     input_data = json.load(reader)["data"]
